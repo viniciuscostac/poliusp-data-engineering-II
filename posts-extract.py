@@ -1,4 +1,5 @@
 import os
+import boto3
 import pandas as pd
 import requests
 from openai import OpenAI
@@ -7,17 +8,31 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Variaveis Reddit
+SUBREDDIT = "python"
 client_id = os.environ.get("REDDIT_CLIENT_KEY")
 client_secret = os.environ.get("REDDIT_SECRET_KEY")
 user_agent = os.environ.get("REDDIT_USER_AGENT")
 
 # Variaveis OpenAI
-client = OpenAI()
+client = OpenAI(    
+    api_key=os.environ.get("OPENROUTERAI_API_KEY"),
+    base_url="https://openrouter.ai/api/v1"
+    )
+
+# S3 Client
+s3 = boto3.client(
+    "s3",
+    aws_access_key_id = os.environ.get("AWS_ACCESS_KEY"),
+    aws_secret_access_key = os.environ.get("AWS_SECRET_ACCESS_KEY"),
+
+)
+
+CSV_PATH = f"{SUBREDDIT}.csv"
 
 # Classificar sentimento
 def classificar_sentimento(texto):
     completion = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="mistralai/mixtral-8x7b",
             messages=[
             {
                 "role": "system",
@@ -71,8 +86,18 @@ def create_posts_df(posts):
 
 # Juntando tudo
 token = get_reddit_access_token(client_id, client_secret)
-posts = get_hot_posts("python", token)
+
+print("Obtendo hot posts")
+posts = get_hot_posts(SUBREDDIT, token)
 df_posts = create_posts_df(posts)
+
+print("Classificando sentimentos")
 df_posts["sentimento"] = df_posts["title"].apply(classificar_sentimento)
-df_posts.to_csv("posts.csv", index=False)
-print(df_posts.shape)
+
+print(f"Salvando {CSV_PATH}")
+df_posts.to_csv(CSV_PATH, index=False)
+
+print("Escrevendo posts no S3")
+bucket_name = os.environ.get("AWS_S3_BUCKET_NAME")
+object_name = CSV_PATH
+s3.upload_file(CSV_PATH, bucket_name, f"subreddits/{CSV_PATH}")
